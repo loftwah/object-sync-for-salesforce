@@ -281,6 +281,8 @@ class Object_Sync_Sf_Salesforce_Pull {
 				$logging->setup( $debug );
 			}
 
+			error_log( 'run query ' . (string) $soql );
+
 			// Execute query
 			// have to cast it to string to make sure it uses the magic method
 			// we don't want to cache this because timestamps
@@ -419,6 +421,7 @@ class Object_Sync_Sf_Salesforce_Pull {
 						}
 
 						// add a queue action to save data from salesforce
+						error_log( 'add record ID ' . $result['Id'] . ' to the queue' );
 						$this->queue->add(
 							$this->schedulable_classes[ $this->schedule_name ]['callback'],
 							array(
@@ -458,11 +461,42 @@ class Object_Sync_Sf_Salesforce_Pull {
 					} // end if
 				} // end foreach
 
-				// we're done with the foreach. store the LastModifiedDate of the last item processed, or the current time if it isn't there.
-				$last_date_for_query = isset( $result['LastModifiedDate'] ) ? $result['LastModifiedDate'] : '';
-				$this->increment_current_type_datetime( $type, $last_date_for_query );
-
+				// if batch works, or if there are more records, do more queries. if this is the end of the data, update the settings
 				if ( true === $this->batch_soql_queries ) {
+					if ( 1 === (int) $this->debug ) {
+						// create log entry for successful pull
+						$status = 'debug';
+						$title  = sprintf(
+							// translators: placeholders are: 1) the Salesforce object type
+							esc_html__( 'Get the next batch of %1$s records from Salesforce', 'object-sync-for-salesforce' ),
+							esc_attr( $type )
+						);
+
+						$body = sprintf(
+							// translators: placeholders are 1) the last sync time, 2) Salesforce mapping array, 3) the triggers, 4) the query options, 5) the API response
+							'<p>' . esc_html__( 'Last Sync: %1$s', 'object-sync-for-salesforce' ) . '</p><p>' . esc_html__( 'Salesforce Mapping: %2$s', 'object-sync-for-salesforce' ) . '</p><p>' . esc_html__( 'Map Sync Triggers: %3$s', 'object-sync-for-salesforce' ) . '</p><p>' . esc_html__( 'Query Options: %4$s', 'object-sync-for-salesforce' ) . '</p><p>' . esc_html__( 'API Response: %5$s', 'object-sync-for-salesforce' ) . '</p>',
+							esc_attr( $last_sync ),
+							print_r( $salesforce_mapping, true ),
+							print_r( $map_sync_triggers, true ),
+							print_r( $query_options, true ),
+							print_r( $response, true )
+						);
+
+						if ( isset( $this->logging ) ) {
+							$logging = $this->logging;
+						} elseif ( class_exists( 'Object_Sync_Sf_Logging' ) ) {
+							$logging = new Object_Sync_Sf_Logging( $this->wpdb, $this->version );
+						}
+
+						$debug = array(
+							'title'   => $title,
+							'message' => $body,
+							'trigger' => $sf_sync_trigger,
+							'parent'  => '',
+							'status'  => $status,
+						);
+						$logging->setup( $debug );
+					} // end of debug
 					// if applicable, process the next batch of records
 					$this->get_next_record_batch( $last_sync, $salesforce_mapping, $map_sync_triggers, $type, $version_path, $query_options, $response );
 				} else {
@@ -476,15 +510,116 @@ class Object_Sync_Sf_Salesforce_Pull {
 					if ( true === $does_next_offset_have_results ) {
 						// increment SOQL query to run
 						$soql = $this->get_pull_query( $type, $salesforce_mapping );
+						error_log( 'next soql query to run is ' . (string) $soql );
+						if ( 1 === (int) $this->debug ) {
+							// create log entry for successful pull
+							$status = 'debug';
+							$title  = sprintf(
+								// translators: placeholders are: 1) the log status, 2) the Salesforce ID
+								esc_html__( 'The Salesforce result for %1$s records has more results. Increment the query for them.', 'object-sync-for-salesforce' ),
+								esc_attr( $type )
+							);
+
+							$body = sprintf(
+								// translators: 1) is the SOQL query we're running
+								esc_html__( 'The next SOQL query is %1$s.', 'object-sync-for-salesforce' ),
+								esc_html( (string) $soql )
+							);
+
+							if ( isset( $this->logging ) ) {
+								$logging = $this->logging;
+							} elseif ( class_exists( 'Object_Sync_Sf_Logging' ) ) {
+								$logging = new Object_Sync_Sf_Logging( $this->wpdb, $this->version );
+							}
+
+							$debug = array(
+								'title'   => $title,
+								'message' => $body,
+								'trigger' => $sf_sync_trigger,
+								'parent'  => '',
+								'status'  => $status,
+							);
+							$logging->setup( $debug );
+						} // end of debug
 					} elseif ( $last_record_key === $key ) {
+						// update the last sync timestamp for this content type
+						$next_query_modified_date = $this->increment_current_type_datetime( $type );
 						// clear the stored query. we don't need to offset and we've finished the loop.
 						$this->clear_current_type_query( $type );
+						error_log( 'last record key is ' . $last_record_key . ' and key is ' . $key . ' so we are clearing all the stuff and setting ' . wp_date( $next_query_modified_date ) . ' as the next query modified date' );
+						if ( 1 === (int) $this->debug ) {
+							// create log entry for successful pull
+							$status = 'debug';
+							$title  = sprintf(
+								// translators: placeholders are: 1) the log status, 2) the Salesforce ID
+								esc_html__( 'The Salesforce result for %1$s records has no more results. This is the end of the multistep query.', 'object-sync-for-salesforce' ),
+								esc_attr( $type )
+							);
+
+							$body = sprintf(
+								// translators: 1) is the SOQL query we're running
+								esc_html__( 'The modified date is %1$s.', 'object-sync-for-salesforce' ),
+								esc_attr( $next_query_modified_date )
+							);
+
+							if ( isset( $this->logging ) ) {
+								$logging = $this->logging;
+							} elseif ( class_exists( 'Object_Sync_Sf_Logging' ) ) {
+								$logging = new Object_Sync_Sf_Logging( $this->wpdb, $this->version );
+							}
+
+							$debug = array(
+								'title'   => $title,
+								'message' => esc_html__( 'This query has no more results. The plugin has cleared the currently running query value, and updated the last sync value to ', 'object-sync-for-salesforce' ),
+								'trigger' => $sf_sync_trigger,
+								'parent'  => '',
+								'status'  => $status,
+							);
+							$logging->setup( $debug );
+						} // end of debug
 					}
 				} // end if
 			} elseif ( ! isset( $response['errorCode'] ) && 0 === count( $response['records'] ) && false === $this->batch_soql_queries ) {
+
+				error_log( 'this is not an error, but now there are zero records remaining' );
 				// only update/clear these option values if we are currently still processing a query
 				if ( '' !== get_option( $this->option_prefix . 'currently_pulling_query_' . $type, '' ) ) {
+					// update the last sync timestamp for this content type
+					$next_query_modified_date = $this->increment_current_type_datetime( $type );
 					$this->clear_current_type_query( $type );
+
+					error_log( 'zero results so we are clearing all the stuff and setting ' . wp_date( $next_query_modified_date ) . ' as the next query modified date' );
+
+					if ( 1 === (int) $this->debug ) {
+						// create log entry for successful pull
+						$status = 'debug';
+						$title  = sprintf(
+							// translators: placeholders are: 1) the log status, 2) the Salesforce ID
+							esc_html__( 'The Salesforce result for %1$s records has zero records.', 'object-sync-for-salesforce' ),
+							esc_attr( $type )
+						);
+
+						$body = sprintf(
+							// translators: 1) is the SOQL query we're running
+							esc_html__( 'The modified date is %1$s.', 'object-sync-for-salesforce' ),
+							esc_attr( $next_query_modified_date )
+						);
+
+						if ( isset( $this->logging ) ) {
+							$logging = $this->logging;
+						} elseif ( class_exists( 'Object_Sync_Sf_Logging' ) ) {
+							$logging = new Object_Sync_Sf_Logging( $this->wpdb, $this->version );
+						}
+
+						$debug = array(
+							'title'   => $title,
+							'message' => esc_html__( 'This query has no more results. The plugin has cleared the currently running query value, and updated the last sync value to ', 'object-sync-for-salesforce' ),
+							'trigger' => $sf_sync_trigger,
+							'parent'  => '',
+							'status'  => $status,
+						);
+						$logging->setup( $debug );
+					} // end of debug
 				}
 			} elseif ( isset( $response['errorCode'] ) ) {
 				// create log entry for failed pull
@@ -2171,8 +2306,6 @@ class Object_Sync_Sf_Salesforce_Pull {
 	*
 	*/
 	private function clear_current_type_query( $type ) {
-		// update the last sync timestamp for this content type
-		$this->increment_current_type_datetime( $type );
 		// delete the option value for the currently pulling query for this type
 		delete_option( $this->option_prefix . 'currently_pulling_query_' . $type );
 		// delete the option value for the last pull record id
@@ -2186,6 +2319,8 @@ class Object_Sync_Sf_Salesforce_Pull {
 	*   e.g. "Contact", "Account", etc.
 	* @param timestamp $next_query_modified_date
 	*   the last record's modified datetime, or the current time if there isn't one
+	* @return timestamp $next_query_modified_date
+	*   updated: last record's modified datetime, or the current time if there isn't one
 	*
 	*/
 	private function increment_current_type_datetime( $type, $next_query_modified_date = '' ) {
@@ -2196,6 +2331,7 @@ class Object_Sync_Sf_Salesforce_Pull {
 			$next_query_modified_date = strtotime( $next_query_modified_date );
 		}
 		update_option( $this->option_prefix . 'pull_last_sync_' . $type, $next_query_modified_date );
+		return $next_query_modified_date;
 	}
 
 	/**
