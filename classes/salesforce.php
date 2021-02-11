@@ -152,6 +152,17 @@ class Object_Sync_Sf_Salesforce {
 	*
 	*/
 	public function is_authorized() {
+		$installed_site_root = $this->get_installed_site_root();
+		$options_site_root   = get_option( 'siteurl', '' );
+		if ( $installed_site_root !== $options_site_root ) {
+			if ( '' === $installed_site_root ) {
+				$this->set_installed_site_root( $options_site_root );
+				$this->access_token  = delete_option( $this->option_prefix . 'access_token' );
+				$this->instance_url  = delete_option( $this->option_prefix . 'instance_url' );
+				$this->refresh_token = delete_option( $this->option_prefix . 'refresh_token' );
+			}
+			return false;
+		}
 		return ! empty( $this->consumer_key ) && ! empty( $this->consumer_secret ) && $this->get_refresh_token();
 	}
 
@@ -608,6 +619,22 @@ class Object_Sync_Sf_Salesforce {
 	*/
 	protected function set_refresh_token( $token ) {
 		update_option( $this->option_prefix . 'refresh_token', $token );
+	}
+
+	/**
+	* Get installed site root
+	*/
+	protected function get_installed_site_root() {
+		return get_option( $this->option_prefix . 'installed_site_root', '' );
+	}
+
+	/**
+	* Set installed site root
+	*
+	* @param string $installed_site_root
+	*/
+	protected function set_installed_site_root( $installed_site_root ) {
+		update_option( $this->option_prefix . 'installed_site_root', $installed_site_root );
 	}
 
 	/**
